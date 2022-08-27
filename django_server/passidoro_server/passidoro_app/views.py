@@ -1,0 +1,555 @@
+import datetime
+import os
+import tempfile
+from math import floor, ceil
+
+from django.contrib.auth import authenticate,login,logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.hashers import check_password
+from django.conf import settings
+from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
+from django.core import files
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.shortcuts import render
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import permission_classes, api_view
+from rest_framework.exceptions import PermissionDenied, NotAuthenticated
+from rest_framework.parsers import JSONParser
+from django.http.response import JsonResponse, HttpResponse
+from django.db import transaction, connection
+from django.core.mail import send_mail, send_mass_mail, EmailMultiAlternatives,get_connection
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import exception_handler
+
+from . import models,serializers
+import json
+from datetime import date
+import secrets
+import string
+
+# Create your views here.
+#from .models import SituazioneGiornaliera, SituazioneGiornalieraBambini, BambiniSezione
+import requests
+
+@csrf_exempt
+def testing_file_api(request,namefile="",token=""):
+    if request.method == "GET":
+        try:
+            if(Token.objects.get(key=token) == None):
+                image_data = open("./images/default-avatar.jpg", "rb").read()
+                return HttpResponse(image_data, content_type="image/jpeg")
+            image_data = open("./images/"+namefile+".jpg", "rb").read()
+            return HttpResponse(image_data,content_type="image/jpeg")
+        except:
+            image_data = open("./images/default-avatar.jpg", "rb").read()
+            return HttpResponse(image_data, content_type="image/jpeg")
+
+#Da cancellare
+@csrf_exempt
+def cambio_password_api(request):
+    if request.method == "PUT":
+        if(request.headers['CUSTOM-OPTION'] == "Recupero"):
+            try:
+                dati = JSONParser().parse(request)
+                user_email = dati['Email']
+                user_new_password = dati['Password']
+                u = User.objects.get(email=user_email)
+                u.set_password(user_new_password)
+                u.save()
+                return JsonResponse("OK",safe=False)
+            except:
+                return JsonResponse("Errore",safe=False)
+        elif(request.headers['CUSTOM-OPTION'] == "Cambio"):
+            try:
+                cambio_data = JSONParser().parse(request)
+                user = User.objects.get(email=cambio_data['Email-attuale'])
+                print(user.password)
+                print(cambio_data['Password-attuale'])
+                if(check_password(cambio_data['Password-attuale'],user.password)):
+                    user.set_password(cambio_data['Nuova-password'])
+                    if(cambio_data['Nuova-email']!=""):
+                        print("Cambio anche email")
+                        user.email = cambio_data['Nuova-email']
+                        user.save()
+                    return JsonResponse("OK", safe=False)
+                else:
+                    print("Non combaciano")
+                    return JsonResponse("Errore",safe=False)
+            except:
+                return JsonResponse("ERRORE",safe=False)
+
+#Utility function
+def str2bool(v):
+  return v.lower() in ("yes", "true", "t", "1")
+
+@csrf_exempt
+@transaction.atomic
+@api_view(['GET','POST','PUT','DELETE'])
+def staff_api(request,id=0):
+    if request.method == "GET":
+            if(request.headers['CUSTOM-OPTION'] == "true" or request.headers['CUSTOM-OPTION'] == "false" ):
+                all_users = User.objects.filter(is_superuser=str2bool(request.headers['CUSTOM-OPTION'])).values()
+                user_list = list(all_users)
+                return JsonResponse(user_list, safe=False)
+            else:
+                try:
+                    user = User.objects.get(id=request.headers['CUSTOM-OPTION'])
+                    serializer = serializers.UserSerializer(user)
+                    return JsonResponse(serializer.data,safe=False)
+                except:
+                    return JsonResponse("Il profilo non esiste",safe=False)
+        #L'idea è di restituire tutti e poi gestire tutto su front-end dividendo tra user e superuser, oppure provare a vedere di passare un altro parametro
+    elif request.method == "PUT":
+        staff_member_data = JSONParser().parse(request)
+        staff_member = User.objects.get(id=staff_member_data['id'])
+        serializer = serializers.UserSerializer(staff_member,data=staff_member_data,partial=True)
+        if(serializer.is_valid()):
+            serializer.save()
+            return JsonResponse("OK",safe=False)
+        else:
+            return JsonResponse("ERRORE",safe=False)
+    elif request.method == "POST":
+         staff_member_data = JSONParser().parse(request)
+         staff_member_name = staff_member_data['Nome']
+         staff_member_surname = staff_member_data['Cognome']
+         staff_member_email = staff_member_data['Email']
+         staff_member_ruolo = staff_member_data['Ruolo']
+         if(User.objects.filter(email=staff_member_email).exists()):
+             return JsonResponse("Errore",safe=False)
+         numbers = string.digits
+         staff_member_username = staff_member_name.lower() + staff_member_surname.lower()+''.join(secrets.choice(numbers) for i in range(5))
+         alphabet = string.ascii_letters
+         password = ''.join(secrets.choice(alphabet) for i in range(8)).lower()
+         #Aggiungere la entry in tabella auth_user
+         html_message = render_to_string('nuovo_membro_staff_email.html', {"username": staff_member_username,"email_nuovo_membro":staff_member_email,"ruolo":staff_member_ruolo,"password":password})
+         plain_message = strip_tags(html_message)
+         from_email = "pierpaolo.sestito.1999@gmail.com"
+         u=None
+         if (send_mail("Iscrizione al sistema PASSI D'ORO", plain_message, from_email, [staff_member_email], html_message=html_message)) > 0:
+             if staff_member_ruolo == "Maestra":
+                 u =  User.objects.create_user(username=staff_member_username, email=staff_member_email, password=password,first_name=staff_member_name,last_name=staff_member_surname,)
+             elif staff_member_ruolo == "Amministratore":
+                 u = User.objects.create_superuser(username=staff_member_username, email=staff_member_email,password=password,first_name=staff_member_name,last_name=staff_member_surname,)
+             #token = Token.objects.create(user=u)-> Viene creato nel momento in cui faccio il login
+             return JsonResponse("OK",safe=False)
+         return JsonResponse("Errore", safe=False)
+    elif request.method == "DELETE":
+        try:
+            utente = User.objects.get(id=id)
+            token = Token.objects.get(user_id=id)
+            token.delete()
+            utente.delete()
+            return JsonResponse("Utente eliminato con successo", safe=False)
+        except:
+            return JsonResponse("Utente non esistente", safe=False)
+
+@csrf_exempt
+@api_view(['GET','POST','PUT'])
+def sezione_api(request):
+    if request.method == "GET":
+        try:
+            sezione = models.Sezione.objects.all()
+            sezione_serializer = serializers.SezioneSerializer(sezione,many=True)
+            return JsonResponse(sezione_serializer.data,safe=False)
+        except:
+            return JsonResponse("Errore",safe=False)
+    elif request.method == "PUT":
+        try:
+            sezione_request = JSONParser().parse(request)
+            for row in sezione_request:
+                print(row['Nome'])
+                sezione = models.Sezione.objects.get(Nome=row['Nome'])
+                sezione_serializer = serializers.SezioneSerializer(sezione,data=row,partial=True)
+                if sezione_serializer.is_valid():
+                    sezione_serializer.save()
+                else:
+                    raise Exception("Errore")
+            return JsonResponse("OK",safe=False)
+        except:
+           return JsonResponse("La sezione non esiste",safe=False)
+    elif request.method == "POST":
+        sezione_data = JSONParser().parse(request)
+        sezione_serializer = serializers.SezioneSerializer(data=sezione_data)
+        if sezione_serializer.is_valid():
+            sezione_serializer.save()
+            return JsonResponse("Aggiunto con successo",safe=False)
+        return JsonResponse("Inserimento non riuscito",safe=False)
+
+
+@csrf_exempt
+def recupero_cambio_password(request):
+    if request.method == "POST":
+        try:
+            data = JSONParser().parse(request)
+            number = request.headers['CUSTOM-OPTION']
+            code = models.ResetPasswordCode.objects.get(ID=data['id'])
+            if(int(number) != code.code_to_sent):
+                return JsonResponse("Errore",safe=False)
+            user = User.objects.get(email=data["Email"])
+            passwordToCheck = data['Password']
+            response = checkmatchesintoname(user.first_name,passwordToCheck)
+            if(response == 1):
+                return JsonResponse("La password è molto simile al tuo nome.",safe=False)
+
+            responsesurname = checkmatchesintoname(user.last_name,passwordToCheck)
+
+            if(responsesurname==1):
+                return JsonResponse("La password è molto simile al tuo cognome",safe=False)
+
+            user.set_password(passwordToCheck)
+            user.save()
+            return JsonResponse("Password cambiata con successo",safe=False)
+        except:
+            return JsonResponse("Errore",safe=False)
+
+#Utility function
+def checkmatchesintoname(a,password):
+    number = len(a)
+    const_string = a
+    meta_number = floor(len(const_string)/2)
+    if(meta_number<=3):
+        meta_number = ceil(len(const_string)/2)
+
+    while(number>=meta_number):
+        print(a)
+        number -= 1
+        if(a.lower() in password.lower() or a.upper() in password.upper()):
+            return 1
+        a = a.rstrip(a[-1])
+    return -1
+
+@csrf_exempt
+def recupero_password_api(request):
+    if request.method == "POST":
+        recupero_password_data = JSONParser().parse(request)
+        if not User.objects.filter(email = recupero_password_data['Email']).exists():
+            return JsonResponse("Risulta esserci un errore",safe=False)
+        else:
+            numbers = string.digits
+            code_to_sent = ''.join(secrets.choice(numbers) for i in range(5))
+
+            html_message = render_to_string('recupero_password_email.html',{"codice":code_to_sent})
+            plain_message = strip_tags(html_message)
+            from_email="pierpaolo.sestito.1999@gmail.com"
+            if(send_mail("Recupero password",plain_message,from_email,[recupero_password_data['Email']],html_message=html_message))>0:
+                recoverycode = models.ResetPasswordCode(code_to_sent=code_to_sent)
+                recoverycode.save()
+                object_to_return={"id":models.ResetPasswordCode.objects.last().ID,"code_to_sent":code_to_sent}
+
+                return JsonResponse(object_to_return,safe=False)
+            else:
+                return JsonResponse("Risulta esserci un errore",safe=False)
+
+#Utility function
+def send_mass_html_mail(datatuple, fail_silently=False, user=None, password=None,
+                        connection=None):
+    """
+    Given a datatuple of (subject, text_content, html_content, from_email,
+    recipient_list), sends each message to each recipient list. Returns the
+    number of emails sent.
+
+    If from_email is None, the DEFAULT_FROM_EMAIL setting is used.
+    If auth_user and auth_password are set, they're used to log in.
+    If auth_user is None, the EMAIL_HOST_USER setting is used.
+    If auth_password is None, the EMAIL_HOST_PASSWORD setting is used.
+
+    """
+    connection = connection or get_connection(
+        username=user, password=password, fail_silently=fail_silently)
+    messages = []
+    for subject, text, html, from_email, recipient in datatuple:
+        message = EmailMultiAlternatives(subject, text, from_email, recipient)
+        message.attach_alternative(html, 'text/html')
+        messages.append(message)
+    return connection.send_messages(messages)
+
+#Da testare verso tutti
+@csrf_exempt
+@api_view(['POST'])
+def invia_comunicazione_api(request):
+    if request.method == "POST":
+        email_data = JSONParser().parse(request)
+        nome_sezione = email_data['Nome_sezione']
+        oggetto = email_data['Oggetto']
+        sezione_interessata = models.Sezione.objects.get(Nome=nome_sezione)
+
+        html_message = render_to_string('comunicazione_email.html',{"oggetto":oggetto,"messaggio":email_data['Messaggio']})
+        plain_message = strip_tags(html_message)
+        from_email = "email_passidoro"
+        to = []
+        if email_data['Solo_rappresentante'] == "Si":
+            to.append(sezione_interessata.Email_Rappresentante)
+            if (send_mail(oggetto, plain_message, from_email, to,html_message=html_message )) > 0:
+                return JsonResponse("Email inviata con successo", safe=False)
+            else:
+                return JsonResponse("Email non inviata", safe=False)
+        else:
+            bambini = models.Bambini.objects.filter(NomeSezione=nome_sezione)
+            # Filtro tutti i bambini con quella sezione e nell'array delle mail metto quelle dei rispettivi genitori e li contatto
+            for i in bambini.iterator():
+                to.append(i.Email_Genitore1)
+                to.append(i.Email_Genitore2)
+            if (send_mail(oggetto, plain_message, from_email, to, html_message=html_message)) > 0:
+                return JsonResponse("Email inviata con successo", safe=False)
+            else:
+                return JsonResponse("Email non inviata", safe=False)
+
+@csrf_exempt
+def invia_report(request):
+    if request.method == "POST":
+        data = JSONParser().parse(request)
+        bambino = models.Bambini.objects.get(ID=data['ID'])
+        report_giornaliero = models.ReportGiornaliero.objects.get(ID=bambino.IDReport.ID)
+
+        html_message = render_to_string('report_email.html',
+                                        {"nome_completo_bambino": bambino.Nome + " " + bambino.Cognome, "data": report_giornaliero.Data, "pasto":report_giornaliero.Pasto,"dormito":report_giornaliero.Ha_dormito,"bisogni_fisiologici":report_giornaliero.Bisogni_fisiologici,"promemoria":report_giornaliero.Promemoria_genitori})
+        plain_message = strip_tags(html_message)
+        from_email = 'pierpaolo.sestito.1999@gmail.com'
+        to = []
+        to.append(bambino.Email_Genitore1)
+        to.append(bambino.Email_Genitore2)
+        numberOfEmailsSent = send_mail("Report giornaliero di "+ bambino.Nome + " " + bambino.Cognome, plain_message, from_email, to, html_message=html_message)
+        if (numberOfEmailsSent > 0):
+            report_giornaliero.Inviato = True
+            report_giornaliero.save()
+            return JsonResponse("Email inviata con successo", safe=False)
+        else:
+            return JsonResponse("Email non inviata", safe=False)
+
+
+@csrf_exempt
+def report_giornaliero_bambino_api(request):
+    if request.method == "GET":
+        try:
+            if not models.Bambini.objects.filter(ID=request.headers['CUSTOM-OPTION']).exists():
+                return JsonResponse("Il report non esiste",safe=False)
+
+            bambino = models.Bambini.objects.get(ID=request.headers['CUSTOM-OPTION'])
+            report_giornaliero = models.ReportGiornaliero.objects.filter(ID=bambino.IDReport.ID)
+            report_giornaliero_serializer = serializers.ReportGiornalieroSerializer(report_giornaliero,many=True)
+            return JsonResponse(report_giornaliero_serializer.data,safe=False)
+        except:
+            return JsonResponse("Il report non esiste",safe=False)
+
+    elif request.method == "PUT":
+        try:
+            report_giornaliero_request = JSONParser().parse(request)
+            bambino = models.Bambini.objects.get(ID=report_giornaliero_request['ID'])
+            report_giornaliero = models.ReportGiornaliero.objects.get(ID=bambino.IDReport.ID)
+            report_giornaliero_serializer = serializers.ReportGiornalieroSerializer(report_giornaliero, data=report_giornaliero_request,partial=True)
+            if report_giornaliero_serializer.is_valid():
+                report_giornaliero_serializer.save()
+                return JsonResponse("Aggiornato con successo", safe=False)
+            return JsonResponse("Aggiornamento non riuscito", safe=False)
+        except:
+            return JsonResponse("Aggiornamento non riuscito", safe=False)
+
+
+@csrf_exempt
+@api_view(['GET'])
+def bambinixreport_sezione_api(request):
+    if request.method == "GET":
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT passidoro_app_bambini.ID,passidoro_app_bambini.Nome,passidoro_app_bambini.Cognome,passidoro_app_bambini.Avatar,passidoro_app_bambini.Orario_uscita,passidoro_app_reportgiornaliero.Inviato,passidoro_app_reportgiornaliero.Modificato FROM passidoro_app_bambini,passidoro_app_reportgiornaliero WHERE passidoro_app_bambini.IDReport_id = passidoro_app_reportgiornaliero.ID && passidoro_app_bambini.NomeSezione_ID = %s',request.headers['CUSTOM-OPTION'])
+            row = cursor.fetchall()
+            root = []
+            for child in row:
+                object = {"ID":child[0],"Nome":child[1],"Cognome":child[2],"Avatar":child[3],"Orario_uscita":child[4],"Inviato":child[5],"Modificato":child[6]}
+                root.append(object)
+            if(len(root) == 0):
+                return JsonResponse("Non ci sono bambini",safe=False)
+        return JsonResponse(root,safe=False)
+
+@csrf_exempt
+@transaction.atomic
+@api_view(['GET','POST','DELETE'])
+def bambini_api(request,sezione=""):
+    if request.method == "GET":
+        try:
+            bambini = models.Bambini.objects.filter(NomeSezione=request.headers['CUSTOM-OPTION'])
+            bambini_serializer = serializers.BambiniSerializer(bambini, many=True)
+            return JsonResponse(bambini_serializer.data, safe=False)
+        except:
+            return JsonResponse("Non esistono bambini appartenenti a questa sezione",safe=False)
+    elif request.method == "POST":
+        bambino_data = JSONParser().parse(request)
+        if(request.headers['CUSTOM-OPTION'] == "TUTTE"):
+            #Elimino tutti i record
+            models.Bambini.objects.all().delete()
+            models.ReportGiornaliero.objects.all().delete()
+        else:
+            lista = models.Bambini.objects.filter(NomeSezione = request.headers['CUSTOM-OPTION'])
+            for i in lista:
+                reportGiornaliero = models.ReportGiornaliero.objects.get(ID=i.IDReport.ID)
+                reportGiornaliero.delete()
+            models.Bambini.objects.filter(NomeSezione = request.headers['CUSTOM-OPTION']).delete()
+
+        bambino_serializer = serializers.BambiniSerializer(data=bambino_data,many=True,partial=True)
+        if bambino_serializer.is_valid():
+            today = datetime.date.today()
+            for i in range(0,len(bambino_data)):
+                #Per ogni bambino devo creare un REPORT e poi passargli il REPORT.ID come parametro e poi salvarlo nel database.
+                report_giornaliero_bambino = models.ReportGiornaliero(Data=today,Pasto="Non ancora selezionato", Ha_dormito=False,Bisogni_fisiologici="Non ancora inserito",Promemoria_genitori="Non ancora inserito",Inviato=False, Modificato=False)
+                report_giornaliero_bambino.save()
+                id_ultimo_report_inserito = models.ReportGiornaliero.objects.last()
+                bambino = models.Bambini(Nome=bambino_data[i]['Nome'], Cognome=bambino_data[i]['Cognome'],
+                                         Email_Genitore1=bambino_data[i]['Email_Genitore1'],
+                                         Email_Genitore2=bambino_data[i]['Email_Genitore2'],
+                                         Data_di_nascita=bambino_data[i]['Data_di_nascita'],
+                                         Orario_uscita="19:00", Avatar="default-avatar",
+                                         NomeSezione=models.Sezione.objects.get(Nome=bambino_data[i]['NomeSezione']),
+                                         IDReport=id_ultimo_report_inserito)
+                bambino.save()
+            return JsonResponse("OK",safe=False)
+        else:
+            return JsonResponse("Inserimento non riuscito",safe=False)
+    elif request.method == "DELETE":
+        try:
+            bambini = models.Bambini.objects.filter(NomeSezione=sezione)
+            for i in bambini.iterator():
+                i.IDReport.delete()
+            bambini.delete()
+            return JsonResponse("Bambini eliminati con successo",safe=False)
+        except:
+            return JsonResponse("Non esistono bambini appartenenti a questa sezione", safe=False)
+
+
+@csrf_exempt
+@transaction.atomic
+@api_view(['GET','POST','PUT','DELETE'])
+def singolo_bambino_api(request,id=0):
+    if request.method == "GET":
+        try:
+                if not models.Bambini.objects.filter(ID=request.headers['CUSTOM-OPTION']).exists():
+                    return JsonResponse("Il bambino non esiste")
+                bambino = models.Bambini.objects.filter(ID=request.headers['CUSTOM-OPTION'])
+                bambino_serializer = serializers.BambiniSerializer(bambino,many=True)
+                return JsonResponse(bambino_serializer.data,safe = False)
+        except:
+            return JsonResponse("Il bambino non esiste",safe=False)
+
+    #Quando inserisco un bambino, in contemporanea si crea un report giornaliero con il suo id.
+    elif request.method == "POST":
+        bambino_data = JSONParser().parse(request)
+        bambino_serializer = serializers.BambiniSerializer(data=bambino_data,partial=True)
+        if bambino_serializer.is_valid():
+            today = datetime.date.today()
+            report_giornaliero_bambino = models.ReportGiornaliero(Data=today,
+                                                                  Pasto="Non ancora selezionato", Ha_dormito=False,
+                                                                  Bisogni_fisiologici="Non ancora inserito",
+                                                                  Promemoria_genitori="Non ancora inserito",
+                                                                  Inviato=False, Modificato=False)
+            report_giornaliero_bambino.save()
+            id_ultimo_report_inserito = models.ReportGiornaliero.objects.last()
+
+            if(bambino_data['Avatar']!="default-avatar"):
+
+                today = datetime.date.today()
+                response = requests.get(bambino_data['Avatar'], stream=True)
+                filename = bambino_data['Avatar'].split('/')[-1]
+                filename = filename.split('.')[0]
+                filename = filename + bambino_data['Nome']+bambino_data['Cognome']+bambino_data['Data_di_nascita']+str(today)+".jpg"
+                lf = tempfile.NamedTemporaryFile()
+
+                for block in response.iter_content(1024 * 8):
+                    if not block:
+                        break
+                    lf.write(block)
+                image = models.TestingFile()
+                print(filename.split('.')[0])
+                bambino_data['Avatar'] = filename.split('.')[0]
+                image.FileData.save(filename, files.File(lf))
+            bambino = models.Bambini(Nome = bambino_data['Nome'],Cognome = bambino_data['Cognome'], Email_Genitore1 = bambino_data['Email_Genitore1'],Email_Genitore2 = bambino_data['Email_Genitore2'], Data_di_nascita = bambino_data['Data_di_nascita'],Orario_uscita = bambino_data['Orario_uscita'],Avatar = bambino_data['Avatar'],NomeSezione = models.Sezione.objects.get(Nome = bambino_data['NomeSezione']),IDReport = id_ultimo_report_inserito)
+            bambino.save()
+            return JsonResponse("Aggiunto con successo", safe=False)
+        return JsonResponse("Bambino non aggiunto", safe=False)
+
+    elif request.method == "PUT":
+        #try:
+            bambino_request = JSONParser().parse(request)
+            bambino = models.Bambini.objects.get(ID=bambino_request['ID'])
+            avatarPrePut = bambino.Avatar
+            bambino_serializer = serializers.BambiniSerializer(bambino, data=bambino_request,partial=True)
+            if bambino_serializer.is_valid():
+                bambino_serializer.save()
+                if("Avatar" in bambino_request):
+                    if(bambino.Avatar != "default-avatar"):
+                        os.remove("./images/" + avatarPrePut + ".jpg")
+                    numbers = string.digits
+                    today = datetime.date.today()
+                    response = requests.get(bambino_request['Avatar'], stream=True)
+                    filename = bambino_request['Avatar'].split('/')[-1]
+                    filename = filename.split('.')[0]
+                    filename = filename + str(bambino_request['ID'])+str(today)+''.join(secrets.choice(numbers) for i in range(5))+".jpg"
+                    lf = tempfile.NamedTemporaryFile()
+                    for block in response.iter_content(1024 * 8):
+                        if not block:
+                            break
+                        lf.write(block)
+                    image = models.TestingFile()
+                    print(filename.split('.')[0])
+                    bambino.Avatar = filename.split('.')[0]
+                    bambino.save()
+                    image.FileData.save(filename, files.File(lf))
+                return JsonResponse("Aggiornato con successo", safe=False)
+            return JsonResponse("Aggiornamento non riuscito", safe=False)
+        #except:
+            #return JsonResponse("Aggiornamento non riuscito",safe=False)
+
+    elif request.method == "DELETE":
+        print(id)
+        try:
+            bambino = models.Bambini.objects.get(ID=id)
+            if(bambino.Avatar != "default-avatar"):
+                os.remove("./images/" + bambino.Avatar + ".jpg")
+            bambino.IDReport.delete()
+            bambino.delete()
+            return JsonResponse("Bambino eliminato con successo",safe=False)
+        except:
+            return JsonResponse("Il bambino non esiste",safe=False)
+
+@csrf_exempt
+@api_view(['GET','POST','PUT','DELETE'])
+@permission_classes([IsAuthenticated])
+def real_testing_api(request,user_id,id=-1):
+    if request.method == "GET":
+        print(user_id)
+        print(id)
+        testings = models.Testing.objects.all()
+        testings_serializer = serializers.TestingSerializer(testings,many=True)
+        return JsonResponse(testings_serializer.data,safe=False)
+
+    elif request.method =="POST":
+        try:
+            testings_data = JSONParser().parse(request)
+            testings_serializer = serializers.TestingSerializer(data=testings_data)
+            if testings_serializer.is_valid():
+                testings_serializer.save()
+                return JsonResponse("Elemento aggiunto",safe=False)
+            return JsonResponse("Elemento non aggiunto",safe=False)
+        except:
+            return JsonResponse("Elemento non aggiunto", safe=False)
+
+
+    elif request.method == "PUT":
+        try:
+            testing_data = JSONParser().parse(request)
+            testing = models.Testing.objects.get(TestingID=testing_data['TestingID'])
+            testing_jsonFormat = serializers.TestingSerializer(testing, data=testing_data,partial=True)
+            if testing_jsonFormat.is_valid():
+                testing_jsonFormat.save()
+                return JsonResponse("Elemento aggiornato", safe=False)
+            return JsonResponse("Elemento non aggiornato",safe=False)
+        except:
+            return JsonResponse("Elemento non aggiornato", safe=False)
+
+    elif request.method == "DELETE":
+        try:
+            testing = models.Testing.objects.get(TestingID=id)
+            testing.delete()
+            return JsonResponse("Elemento eliminato",safe=False)
+        except:
+            return JsonResponse("Elemento non eliminato",safe=False)
