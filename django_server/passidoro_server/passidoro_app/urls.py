@@ -23,6 +23,8 @@ urlpatterns=[
     re_path('^singolo_bambino$',views.singolo_bambino_api),
     re_path('^singolo_bambino/([0-9]+)$',views.singolo_bambino_api),
 
+    re_path('^verifica_password$',views.verifypassword),
+    re_path('^a$',views.testingpostbambini),
     re_path('^bambini$',views.bambini_api),
     re_path('^bambini/([a-z]+)$',views.bambini_api),
 
@@ -31,8 +33,9 @@ urlpatterns=[
     re_path('^report_giornaliero$', views.report_giornaliero_bambino_api),
     re_path('^report_giornaliero/([0-9]+)$',views.report_giornaliero_bambino_api),
 
-    re_path('^staff$', views.staff_api),
-    re_path('^staff/([0-9]+)$',views.staff_api),
+    re_path('^staff$',views.staff_api),
+    re_path('^singolo_staff$', views.singolo_staff_api),
+    re_path('^singolo_staff/([0-9]+)$',views.singolo_staff_api),
 
     re_path('^recupero_password$', views.recupero_password_api),
     re_path('^recupero_password/cambio_password$', views.recupero_cambio_password),

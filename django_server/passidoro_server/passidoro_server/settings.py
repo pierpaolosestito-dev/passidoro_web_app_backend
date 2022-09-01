@@ -51,7 +51,8 @@ INSTALLED_APPS = [
     'passidoro_app.apps.PassidoroAppConfig',
 
 ]
-
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_COOKIE_DOMAIN= '.localhost'
 REST_AUTH_SERIALIZERS = {
     'TOKEN_SERIALIZER': 'passidoro_app.serializers.TokenSerializer'
 }
