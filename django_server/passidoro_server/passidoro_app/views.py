@@ -183,7 +183,6 @@ def checkmatchesintoname(a,password):
         meta_number = ceil(len(const_string)/2)
 
     while(number>=meta_number):
-        print(a)
         number -= 1
         if(a.lower() in password.lower() or a.upper() in password.upper()):
             return 1
@@ -195,13 +194,9 @@ def recupero_conferma_codice(request):
         try:
             data = JSONParser().parse(request)
             security_code = models.ResetPasswordCode.objects.get(ID=data["id"])
-            print(data["id"])
-            print(security_code.code_to_sent)
-            print(data["codice"])
             if(security_code.code_to_sent == int(data["codice"])):
                 return JsonResponse("Codice corretto",safe=False)
             else:
-                print("Codice errato")
                 return JsonResponse("Codice errato",safe=False)
         except:
             return JsonResponse("Codice errato", safe=False)
@@ -428,7 +423,6 @@ def singolo_bambino_api(request,id=0):
                         break
                     lf.write(block)
                 image = models.TestingFile()
-                print(filename.split('.')[0])
                 bambino_data['Avatar'] = filename.split('.')[0]
                 image.FileData.save(filename, files.File(lf))
             bambino = models.Bambini(Nome = bambino_data['Nome'],Cognome = bambino_data['Cognome'], Email_Genitore1 = bambino_data['Email_Genitore1'],Email_Genitore2 = bambino_data['Email_Genitore2'], Data_di_nascita = bambino_data['Data_di_nascita'],Orario_uscita = bambino_data['Orario_uscita'],Avatar = bambino_data['Avatar'],NomeSezione = models.Sezione.objects.get(Nome = bambino_data['NomeSezione']),IDReport = id_ultimo_report_inserito)
@@ -441,13 +435,11 @@ def singolo_bambino_api(request,id=0):
             bambino_request = JSONParser().parse(request)
             bambino = models.Bambini.objects.get(ID=bambino_request['ID'])
             avatarPrePut = bambino.Avatar
-            print(avatarPrePut)
             bambino_serializer = serializers.BambiniSerializer(bambino, data=bambino_request,partial=True)
             if bambino_serializer.is_valid():
                 bambino_serializer.save()
                 if("Avatar" in bambino_request):
                     if(avatarPrePut != "default-avatar"):
-                        print("Ho rimosso default avatar")
                         os.remove("./images/" + avatarPrePut + ".jpg")
                     numbers = string.digits
                     today = datetime.date.today()
@@ -461,7 +453,6 @@ def singolo_bambino_api(request,id=0):
                             break
                         lf.write(block)
                     image = models.TestingFile()
-                    print(filename.split('.')[0])
                     bambino.Avatar = filename.split('.')[0]
                     bambino.save()
                     image.FileData.save(filename, files.File(lf))
