@@ -47,39 +47,6 @@ def testing_file_api(request,namefile="",token=""):
             image_data = open("./images/default-avatar.jpg", "rb").read()
             return HttpResponse(image_data, content_type="image/jpeg")
 
-#Da cancellare
-@csrf_exempt
-def cambio_password_api(request):
-    if request.method == "PUT":
-        if(request.headers['CUSTOM-OPTION'] == "Recupero"):
-            try:
-                dati = JSONParser().parse(request)
-                user_email = dati['Email']
-                user_new_password = dati['Password']
-                u = User.objects.get(email=user_email)
-                u.set_password(user_new_password)
-                u.save()
-                return JsonResponse("OK",safe=False)
-            except:
-                return JsonResponse("Errore",safe=False)
-        elif(request.headers['CUSTOM-OPTION'] == "Cambio"):
-            try:
-                cambio_data = JSONParser().parse(request)
-                user = User.objects.get(email=cambio_data['Email-attuale'])
-                print(user.password)
-                print(cambio_data['Password-attuale'])
-                if(check_password(cambio_data['Password-attuale'],user.password)):
-                    user.set_password(cambio_data['Nuova-password'])
-                    if(cambio_data['Nuova-email']!=""):
-                        print("Cambio anche email")
-                        user.email = cambio_data['Nuova-email']
-                        user.save()
-                    return JsonResponse("OK", safe=False)
-                else:
-                    print("Non combaciano")
-                    return JsonResponse("Errore",safe=False)
-            except:
-                return JsonResponse("ERRORE",safe=False)
 
 #Utility function
 def str2bool(v):
@@ -95,7 +62,7 @@ def staff_api(request):
 
 @csrf_exempt
 @transaction.atomic
-#@api_view(['GET','POST','PUT','DELETE'])
+@api_view(['GET','POST','PUT','DELETE'])
 def singolo_staff_api(request,id=0):
     if request.method == "GET":
                 try:
@@ -104,7 +71,7 @@ def singolo_staff_api(request,id=0):
                     return JsonResponse(serializer.data,safe=False)
                 except:
                     return JsonResponse("Il profilo non esiste",safe=False)
-        #L'idea è di restituire tutti e poi gestire tutto su front-end dividendo tra user e superuser, oppure provare a vedere di passare un altro parametro
+
     elif request.method == "PUT":
         staff_member_data = JSONParser().parse(request)
         staff_member = User.objects.get(id=staff_member_data['id'])
@@ -114,20 +81,20 @@ def singolo_staff_api(request,id=0):
             return JsonResponse("OK",safe=False)
         else:
             return JsonResponse("ERRORE",safe=False)
+
     elif request.method == "POST":
          staff_member_data = JSONParser().parse(request)
          staff_member_name = staff_member_data['Nome']
          staff_member_surname = staff_member_data['Cognome']
          staff_member_email = staff_member_data['Email']
          staff_member_ruolo = staff_member_data['Ruolo']
-         print(staff_member_email)
          if(User.objects.filter(email=staff_member_email).exists()):
              return JsonResponse("Errore",safe=False)
          numbers = string.digits
          staff_member_username = staff_member_name.lower() + staff_member_surname.lower()+''.join(secrets.choice(numbers) for i in range(5))
          alphabet = string.ascii_letters
          password = ''.join(secrets.choice(alphabet) for i in range(8)).lower()
-         #Aggiungere la entry in tabella auth_user
+
          html_message = render_to_string('nuovo_membro_staff_email.html', {"username": staff_member_username,"email_nuovo_membro":staff_member_email,"ruolo":staff_member_ruolo,"password":password})
          plain_message = strip_tags(html_message)
          from_email = "pierpaolo.sestito.1999@gmail.com"
@@ -137,14 +104,12 @@ def singolo_staff_api(request,id=0):
                  u =  User.objects.create_user(username=staff_member_username, email=staff_member_email, password=password,first_name=staff_member_name,last_name=staff_member_surname,)
              elif staff_member_ruolo == "Amministratore":
                  u = User.objects.create_superuser(username=staff_member_username, email=staff_member_email,password=password,first_name=staff_member_name,last_name=staff_member_surname,)
-             #token = Token.objects.create(user=u)-> Viene creato nel momento in cui faccio il login
+
              return JsonResponse("OK",safe=False)
          return JsonResponse("Errore", safe=False)
     elif request.method == "DELETE":
         try:
             utente = User.objects.get(id=id)
-            #token = Token.objects.get(user_id=id)
-            #token.delete()
             utente.delete()
             return JsonResponse("Utente eliminato con successo", safe=False)
         except:
@@ -164,13 +129,12 @@ def sezione_api(request):
         try:
             sezione_request = JSONParser().parse(request)
             for row in sezione_request:
-                print(row['Nome'])
                 sezione = models.Sezione.objects.get(Nome=row['Nome'])
                 sezione_serializer = serializers.SezioneSerializer(sezione,data=row,partial=True)
                 if sezione_serializer.is_valid():
                     sezione_serializer.save()
                 else:
-                    raise Exception("Errore")
+                    return JsonResponse("Errore",safe=False)
             return JsonResponse("OK",safe=False)
         except:
            return JsonResponse("La sezione non esiste",safe=False)
@@ -188,9 +152,8 @@ def recupero_cambio_password(request):
     if request.method == "POST":
         try:
             data = JSONParser().parse(request)
-            number = request.headers['CUSTOM-OPTION']
             code = models.ResetPasswordCode.objects.get(ID=data['id'])
-            if(int(number) != code.code_to_sent):
+            if(int(data["codice"]) != code.code_to_sent):
                 return JsonResponse("Errore",safe=False)
             user = User.objects.get(email=data["Email"])
             passwordToCheck = data['Password']
@@ -205,7 +168,7 @@ def recupero_cambio_password(request):
 
             user.set_password(passwordToCheck)
             user.save()
-            #logout(request)
+
             code.delete()
             return JsonResponse("Password cambiata con successo",safe=False)
         except:
@@ -226,12 +189,25 @@ def checkmatchesintoname(a,password):
             return 1
         a = a.rstrip(a[-1])
     return -1
-
+@csrf_exempt
+def recupero_conferma_codice(request):
+    if request.method == "POST":
+        try:
+            data = JSONParser().parse(request)
+            security_code = models.ResetPasswordCode.objects.get(ID=data["id"])
+            print(data["id"])
+            print(security_code.code_to_sent)
+            print(data["codice"])
+            if(security_code.code_to_sent == int(data["codice"])):
+                return JsonResponse("Codice corretto",safe=False)
+            else:
+                print("Codice errato")
+                return JsonResponse("Codice errato",safe=False)
+        except:
+            return JsonResponse("Codice errato", safe=False)
 @csrf_exempt
 def recupero_password_api(request):
     if request.method == "POST":
-        #user = User.objects.create_user('batman', 'batman@passidoro.com', 'batmanpassword')
-        #return JsonResponse("OK",safe=False)
         recupero_password_data = JSONParser().parse(request)
         if not User.objects.filter(email = recupero_password_data['Email']).exists():
             return JsonResponse("Risulta esserci un errore",safe=False)
@@ -243,21 +219,14 @@ def recupero_password_api(request):
             plain_message = strip_tags(html_message)
             from_email="pierpaolo.sestito.1999@gmail.com"
             if(send_mail("Recupero password",plain_message,from_email,[recupero_password_data['Email']],html_message=html_message))>0:
-                #user = User.objects.get(username="batman")
-                #login(request,user)
-                #if not request.session.session_key:
-                #    request.session.create()
-                #request.session['code_to_sent'] = code_to_sent
-                #request.session.modified = True
-                #print(request.session.session_key)
                 recoverycode = models.ResetPasswordCode(code_to_sent=code_to_sent)
                 recoverycode.save()
-                object_to_return={"id":models.ResetPasswordCode.objects.last().ID,"code_to_sent":code_to_sent}
+                object_to_return={"id":models.ResetPasswordCode.objects.last().ID}
                 return JsonResponse(object_to_return,safe=False)
             else:
                 return JsonResponse("Risulta esserci un errore",safe=False)
 
-#Da testare verso tutti
+
 @csrf_exempt
 @api_view(['POST'])
 def invia_comunicazione_api(request):
@@ -280,7 +249,6 @@ def invia_comunicazione_api(request):
                     return JsonResponse("Email non inviata", safe=False)
             else:
                 bambini = models.Bambini.objects.filter(NomeSezione=nome_sezione)
-            # Filtro tutti i bambini con quella sezione e nell'array delle mail metto quelle dei rispettivi genitori e li contatto
                 for i in bambini.iterator():
                     to.append(i.Email_Genitore1)
                     to.append(i.Email_Genitore2)
@@ -292,6 +260,7 @@ def invia_comunicazione_api(request):
             return JsonResponse("Email non inviata", safe=False)
 
 @csrf_exempt
+@api_view(['POST'])
 def invia_report(request):
     if request.method == "POST":
         data = JSONParser().parse(request)
@@ -315,12 +284,12 @@ def invia_report(request):
 
 
 @csrf_exempt
+@api_view(['GET','PUT'])
 def report_giornaliero_bambino_api(request):
     if request.method == "GET":
         try:
             if not models.Bambini.objects.filter(ID=request.headers['CUSTOM-OPTION']).exists():
                 return JsonResponse("Il report non esiste",safe=False)
-
             bambino = models.Bambini.objects.get(ID=request.headers['CUSTOM-OPTION'])
             report_giornaliero = models.ReportGiornaliero.objects.filter(ID=bambino.IDReport.ID)
             report_giornaliero_serializer = serializers.ReportGiornalieroSerializer(report_giornaliero,many=True)
@@ -405,37 +374,7 @@ def bambini_api(request,sezione=""):
             trovatoUguale = False
 
         return JsonResponse("OK", safe=False)
-        #bambino_data = JSONParser().parse(request)
-        #if(request.headers['CUSTOM-OPTION'] == "TUTTE"):
-        #    #Elimino tutti i record
-        #    models.Bambini.objects.all().delete()
-        #    models.ReportGiornaliero.objects.all().delete()
-        #else:
-        #    lista = models.Bambini.objects.filter(NomeSezione = request.headers['CUSTOM-OPTION'])
-        #    for i in lista:
-        #        reportGiornaliero = models.ReportGiornaliero.objects.get(ID=i.IDReport.ID)
-        #        reportGiornaliero.delete()
-        #    models.Bambini.objects.filter(NomeSezione = request.headers['CUSTOM-OPTION']).delete()
 
-        #bambino_serializer = serializers.BambiniSerializer(data=bambino_data,many=True,partial=True)
-        #if bambino_serializer.is_valid():
-        #    today = datetime.date.today()
-        #    for i in range(0,len(bambino_data)):
-        #        #Per ogni bambino devo creare un REPORT e poi passargli il REPORT.ID come parametro e poi salvarlo nel database.
-        #        report_giornaliero_bambino = models.ReportGiornaliero(Data=today,Pasto="Non ancora selezionato", Ha_dormito=False,Bisogni_fisiologici="Non ancora inserito",Promemoria_genitori="Non ancora inserito",Inviato=False, Modificato=False)
-        #        report_giornaliero_bambino.save()
-        #        id_ultimo_report_inserito = models.ReportGiornaliero.objects.last()
-        #        bambino = models.Bambini(Nome=bambino_data[i]['Nome'], Cognome=bambino_data[i]['Cognome'],
-        #                                 Email_Genitore1=bambino_data[i]['Email_Genitore1'],
-        #                                 Email_Genitore2=bambino_data[i]['Email_Genitore2'],
-        #                                 Data_di_nascita=bambino_data[i]['Data_di_nascita'],
-        #                                 Orario_uscita="19:00", Avatar="default-avatar",
-        #                                 NomeSezione=models.Sezione.objects.get(Nome=bambino_data[i]['NomeSezione']),
-        #                                 IDReport=id_ultimo_report_inserito)
-        #        bambino.save()
-        #    return JsonResponse("OK",safe=False)
-        #else:
-        #    return JsonResponse("Inserimento non riuscito",safe=False)
     elif request.method == "DELETE":
         try:
                 bambini = models.Bambini.objects.filter(NomeSezione=sezione)
@@ -461,7 +400,7 @@ def singolo_bambino_api(request,id=0):
         except:
             return JsonResponse("Il bambino non esiste",safe=False)
 
-    #Quando inserisco un bambino, in contemporanea si crea un report giornaliero con il suo id.
+
     elif request.method == "POST":
         bambino_data = JSONParser().parse(request)
         bambino_serializer = serializers.BambiniSerializer(data=bambino_data,partial=True)
@@ -498,7 +437,7 @@ def singolo_bambino_api(request,id=0):
         return JsonResponse("Bambino non aggiunto", safe=False)
 
     elif request.method == "PUT":
-        #try:
+        try:
             bambino_request = JSONParser().parse(request)
             bambino = models.Bambini.objects.get(ID=bambino_request['ID'])
             avatarPrePut = bambino.Avatar
@@ -528,11 +467,10 @@ def singolo_bambino_api(request,id=0):
                     image.FileData.save(filename, files.File(lf))
                 return JsonResponse("Aggiornato con successo", safe=False)
             return JsonResponse("Aggiornamento non riuscito", safe=False)
-        #except:
-            #return JsonResponse("Aggiornamento non riuscito",safe=False)
+        except:
+            return JsonResponse("Aggiornamento non riuscito",safe=False)
 
     elif request.method == "DELETE":
-
         try:
                 bambino = models.Bambini.objects.get(ID=id)
                 if(bambino.Avatar != "default-avatar"):
@@ -546,41 +484,10 @@ def singolo_bambino_api(request,id=0):
 
 @csrf_exempt
 @api_view(['POST'])
-def testingpostbambini(request):
-    if(request.method=="POST"):
-        data = JSONParser().parse(request)
-        if(request.headers['CUSTOM-OPTION']=="TUTTE"):
-            bambini = models.Bambini.objects.all()
-        else:
-            bambini = models.Bambini.objects.filter(NomeSezione = request.headers['CUSTOM-OPTION'])
-            # Devo controllare che il bambino non esista già tramite Nome,Cognome,Sezione e una delle due email tra genitore1 e genitore2
-            # Se esiste: non lo aggiungiamo e passiamo alla prossima iterazione
-            # Se non esiste: lo aggiungiamo e creiamo il report giornaliero.
-
-        for i in data:
-            trovatoUguale = False
-            for j in bambini:
-                if(j.Nome == i['Nome'] and j.Cognome==i['Cognome'] and (j.Email_Genitore1==i['Email_Genitore1'] or j.Email_Genitore2==i['Email_Genitore2']) and j.NomeSezione_id == i['Nome_Sezione'] and j.Data_di_nascita==i['Data_di_nascita']):
-                    trovatoUguale=True
-                    break
-            if(trovatoUguale):
-                print(i)
-                print("Trovato un simile")
-            else:
-                pass#Aggiungo creando opportunamente un report
-            trovatoUguale=False
-
-        return JsonResponse("E C'AMU FATTT",safe=False)
-
-
-
-@csrf_exempt
-@api_view(['POST'])
 def verifypassword(request):
     if request.method=="POST":
         try:
             data = JSONParser().parse(request)
-            print(data['password'])
             token = Token.objects.get(key=request.headers['Authorization'].split()[1])
             user = User.objects.get(id=token.user_id)
             if (check_password(data['password'], user.password)):
@@ -590,47 +497,3 @@ def verifypassword(request):
         except:
             return JsonResponse("Errore",safe=False)
 
-
-
-@csrf_exempt
-@api_view(['GET','POST','PUT','DELETE'])
-@permission_classes([IsAuthenticated])
-def real_testing_api(request,user_id,id=-1):
-    if request.method == "GET":
-        print(user_id)
-        print(id)
-        testings = models.Testing.objects.all()
-        testings_serializer = serializers.TestingSerializer(testings,many=True)
-        return JsonResponse(testings_serializer.data,safe=False)
-
-    elif request.method =="POST":
-        try:
-            testings_data = JSONParser().parse(request)
-            testings_serializer = serializers.TestingSerializer(data=testings_data)
-            if testings_serializer.is_valid():
-                testings_serializer.save()
-                return JsonResponse("Elemento aggiunto",safe=False)
-            return JsonResponse("Elemento non aggiunto",safe=False)
-        except:
-            return JsonResponse("Elemento non aggiunto", safe=False)
-
-
-    elif request.method == "PUT":
-        try:
-            testing_data = JSONParser().parse(request)
-            testing = models.Testing.objects.get(TestingID=testing_data['TestingID'])
-            testing_jsonFormat = serializers.TestingSerializer(testing, data=testing_data,partial=True)
-            if testing_jsonFormat.is_valid():
-                testing_jsonFormat.save()
-                return JsonResponse("Elemento aggiornato", safe=False)
-            return JsonResponse("Elemento non aggiornato",safe=False)
-        except:
-            return JsonResponse("Elemento non aggiornato", safe=False)
-
-    elif request.method == "DELETE":
-        try:
-            testing = models.Testing.objects.get(TestingID=id)
-            testing.delete()
-            return JsonResponse("Elemento eliminato",safe=False)
-        except:
-            return JsonResponse("Elemento non eliminato",safe=False)

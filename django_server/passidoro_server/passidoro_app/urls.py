@@ -13,9 +13,7 @@ urlpatterns=[
     re_path('^testingfile/(.+)/(.+)$',views.testing_file_api),
     path('auth/',include('dj_rest_auth.urls')),
 
-    #re_path('^testing$',views.real_testing_api),
-    re_path('^testing/([0-9]+)$',views.real_testing_api),#passo solo user_id
-    re_path('^testing/([0-9]+)/([0-9]+)$',views.real_testing_api),#primo:user_id, secondo:idperladelete
+   #primo:user_id, secondo:idperladelete
 
     re_path('^sezione$',views.sezione_api),
     re_path('^sezione/([a-z]+)$',views.sezione_api),
@@ -24,7 +22,7 @@ urlpatterns=[
     re_path('^singolo_bambino/([0-9]+)$',views.singolo_bambino_api),
 
     re_path('^verifica_password$',views.verifypassword),
-    re_path('^a$',views.testingpostbambini),
+
     re_path('^bambini$',views.bambini_api),
     re_path('^bambini/([a-z]+)$',views.bambini_api),
 
@@ -39,6 +37,7 @@ urlpatterns=[
 
     re_path('^recupero_password$', views.recupero_password_api),
     re_path('^recupero_password/cambio_password$', views.recupero_cambio_password),
+    re_path('^recupero_password/conferma_codice$', views.recupero_conferma_codice),
     re_path('^invia_comunicazione$', views.invia_comunicazione_api),
     re_path('^invia_report$',views.invia_report)
 
