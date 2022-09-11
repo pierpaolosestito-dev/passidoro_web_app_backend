@@ -16,8 +16,8 @@ from pathlib import Path
 EMAIL_USE_TLS = True
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587 #587
-EMAIL_HOST_USER = 'pierpaolo.sestito.1999@gmail.com'
-EMAIL_HOST_PASSWORD = 'yvijokljdjrvuvgh'
+EMAIL_HOST_USER = 'email@gmail.com'
+EMAIL_HOST_PASSWORD = '********'
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,7 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-u=c#sw)h$qs+3d#!++%79u19-fs768d1aagwmba5!eniez)jyw'
+SECRET_KEY = 'SECRET_KEY_USER'
 
 CODE_TO_SENT=0
 # SECURITY WARNING: don't run with debug turned on in production!
