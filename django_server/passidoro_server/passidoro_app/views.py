@@ -253,7 +253,37 @@ def invia_comunicazione_api(request):
                     return JsonResponse("Email non inviata", safe=False)
         except:
             return JsonResponse("Email non inviata", safe=False)
-
+			
+@csrf_exempt
+@api_view(['POST'])
+def invia_tutti_report_api(request):
+    if request.method == "POST":
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT passidoro_app_bambini.ID,passidoro_app_bambini.Nome,passidoro_app_bambini.Cognome,passidoro_app_bambini.Email_Genitore1,passidoro_app_bambini.Email_Genitore2,passidoro_app_bambini.IDReport_id FROM passidoro_app_bambini,passidoro_app_reportgiornaliero WHERE passidoro_app_bambini.IDReport_id = passidoro_app_reportgiornaliero.ID && passidoro_app_reportgiornaliero.Modificato = 1 && passidoro_app_reportgiornaliero.Inviato=0 && passidoro_app_bambini.NomeSezione_ID = %s',request.headers['CUSTOM-OPTION'])
+            row = cursor.fetchall()
+            if(len(row)==0):
+                return JsonResponse("NO",safe=False)
+            for child in row:
+                report_giornaliero = models.ReportGiornaliero.objects.get(ID=child[5])
+                to = []
+                if(child[3]!=None):
+                    to.append(child[3])
+                if(child[4]!=None):
+                    to.append(child[4])
+                html_message = render_to_string('report_email.html',
+                                                {"nome_completo_bambino": child[1] + " " + child[2],
+                                                 "data": report_giornaliero.Data, "pasto": report_giornaliero.Pasto,
+                                                 "dormito": 'SI' if report_giornaliero.Ha_dormito else 'NO',
+                                                 "bisogni_fisiologici": report_giornaliero.Bisogni_fisiologici,
+                                                 "promemoria": report_giornaliero.Promemoria_genitori})
+                plain_message = strip_tags(html_message)
+                numberOfEmailsSent = send_mail("Report giornaliero di " + child[1] + " " + child[2],
+                                               plain_message,"babybot.passi.doro@gmail.com",recipient_list=to, html_message=html_message)
+                if (numberOfEmailsSent > 0):
+                    report_giornaliero.Inviato = True
+                    report_giornaliero.save()
+            return JsonResponse("OK",safe=False)
+			
 @csrf_exempt
 @api_view(['POST'])
 def invia_report(request):

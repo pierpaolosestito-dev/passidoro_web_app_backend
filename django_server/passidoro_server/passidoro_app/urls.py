@@ -30,7 +30,9 @@ urlpatterns=[
 
     re_path('^report_giornaliero$', views.report_giornaliero_bambino_api),
     re_path('^report_giornaliero/([0-9]+)$',views.report_giornaliero_bambino_api),
-
+	re_path('^invia_tutti_report/$',views.invia_tutti_report_api),
+	
+	
     re_path('^staff$',views.staff_api),
     re_path('^singolo_staff$', views.singolo_staff_api),
     re_path('^singolo_staff/([0-9]+)$',views.singolo_staff_api),
